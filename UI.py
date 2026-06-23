@@ -2,11 +2,9 @@ import tkinter as tk
 from tkinter import simpledialog, messagebox
 from datetime import datetime
 import customtkinter as ctk
-import threading
-import socket
-import Pyro5.api
 import os
 import json
+from network_client import ChatNetworkClient, get_local_ip
 
 # ── Palette ────────────────────────────────────────────────────────────────
 BG_DARK      = "#0C0E14"   
@@ -26,25 +24,7 @@ DANGER_HOVER = "#DC2626"
 INPUT_BG     = "#1A1B26"   
 BORDER_COLOR = "#23283D"   
 
-def get_local_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('10.255.255.255', 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
-    return IP
-
-@Pyro5.api.expose
-class ClientNode(object):
-    def __init__(self, ui_app):
-        self.ui_app = ui_app
-
-    def receive_message(self, sender, text, time):
-        # Escalonar para a thread principal da UI
-        self.ui_app.after(0, self.ui_app.handle_incoming_message, sender, text, time)
+# (get_local_ip e ClientNode foram movidos para network_client.py)
 
 # ═══════════════════════════════════════════════════════════════════════════
 class ChatApp(ctk.CTk):
@@ -75,56 +55,23 @@ class ChatApp(ctk.CTk):
             self.destroy()
             os._exit(0)
 
-        print(f"[DEBUG] IP do servidor definido: {self.server_ip}. Conectando ao proxy...")
-        # Conectar ao servidor
-        try:
-            self.server = Pyro5.api.Proxy(f"PYRO:MessageServer@{self.server_ip}:9090")
-            self.server._pyroBind()
-            print("[DEBUG] Conexão Pyro5 com o servidor estabelecida.")
-        except Exception as e:
-            print(f"[DEBUG] Falha na conexão com o servidor: {e}")
-            messagebox.showerror("Erro de Conexão", f"Não foi possível conectar ao servidor.\n{e}")
-            self.destroy()
-            os._exit(0)
-
         self.my_online = tk.BooleanVar(value=True)
         self._load_data()
         self.active_chat = tk.StringVar(value="")
 
-        print("[DEBUG] Iniciando daemon thread local...")
-        # Iniciar o daemon local
-        self.daemon_exception = None
-        self.client_node = ClientNode(self)
-        self.daemon_thread = threading.Thread(target=self._run_daemon, daemon=True)
-        self.daemon_thread.start()
-
-        import time as time_mod
-        start_time = time_mod.time()
-        while not hasattr(self, 'my_uri'):
-            if self.daemon_exception:
-                print(f"[DEBUG] Erro no daemon local: {self.daemon_exception}")
-                messagebox.showerror("Erro de Inicialização", f"Falha ao iniciar o daemon Pyro5 local:\n{self.daemon_exception}")
-                self.destroy()
-                os._exit(0)
-            if time_mod.time() - start_time > 5.0:
-                print("[DEBUG] Tempo limite esgotado ao iniciar o daemon local.")
-                messagebox.showerror("Erro de Inicialização", "Tempo limite excedido ao iniciar o daemon local (Pyro5).")
-                self.destroy()
-                os._exit(0)
-            time_mod.sleep(0.1)
-
-        print(f"[DEBUG] Daemon local iniciado na URI: {self.my_uri}")
-
-        # Login no servidor
+        # Inicializar e conectar o gerenciador de rede
         try:
-            print("[DEBUG] Registrando cliente no servidor...")
-            self.server.register_client(self.my_name)
-            print("[DEBUG] Cliente registrado. Efetuando login...")
-            offline_msgs = self.server.login(self.my_name, self.my_uri)
+            # Callback thread-safe para receber mensagens de rede
+            def on_message_received(sender, text, time):
+                self.after(0, self.handle_incoming_message, sender, text, time)
+                
+            self.network = ChatNetworkClient(self.my_name, self.server_ip, on_message_received)
+            print("[DEBUG] Conectando ao cliente de rede...")
+            offline_msgs = self.network.connect()
             print(f"[DEBUG] Login efetuado. {len(offline_msgs)} mensagens offline recebidas.")
         except Exception as e:
-            print(f"[DEBUG] Falha no login: {e}")
-            messagebox.showerror("Erro de Login", f"Erro de comunicação/login com o servidor:\n{e}")
+            print(f"[DEBUG] Falha na conexão ou inicialização de rede: {e}")
+            messagebox.showerror("Erro de Conexão", str(e))
             self.destroy()
             os._exit(0)
 
@@ -178,19 +125,12 @@ class ChatApp(ctk.CTk):
         except Exception as e:
             print(f"Erro ao salvar dados locais: {e}")
 
-    def _run_daemon(self):
-        try:
-            ip = get_local_ip()
-            self.daemon = Pyro5.api.Daemon(host=ip, port=0)
-            self.my_uri = self.daemon.register(self.client_node)
-            self.daemon.requestLoop()
-        except Exception as e:
-            self.daemon_exception = e
-
     def on_closing(self):
-        if hasattr(self, 'server') and self.my_online.get():
+        if hasattr(self, 'network'):
             try:
-                self.server.logout(self.my_name)
+                if self.my_online.get():
+                    self.network.toggle_status(False)
+                self.network.close()
             except:
                 pass
         self._save_data()
@@ -204,7 +144,7 @@ class ChatApp(ctk.CTk):
         if not contact:
             is_online = False
             try:
-                is_online, _ = self.server.get_status(sender)
+                is_online, _ = self.network.get_status(sender)
             except: pass
             # Mantém o sender com a capitalização original que ele enviou
             self.contacts.append({"name": sender, "online": is_online, "unread": 0})
@@ -232,12 +172,9 @@ class ChatApp(ctk.CTk):
 
     def _update_statuses(self):
         # Apenas tenta se auto-registrar se o usuário quer estar Online
-        if self.my_online.get():
+        if self.my_online.get() and hasattr(self, 'network'):
             try:
-                is_me_online, _ = self.server.get_status(self.my_name)
-                if not is_me_online:
-                    print(f"[DEBUG] Cliente '{self.my_name}' não registrado como online no servidor. Re-registrando...")
-                    self.server.login(self.my_name, self.my_uri)
+                self.network.ensure_login()
             except Exception as e:
                 print(f"[DEBUG] Erro ao verificar auto-registro no servidor: {e}")
 
@@ -247,28 +184,29 @@ class ChatApp(ctk.CTk):
         active_chat_status_changed = False
         active_chat_updated = False
 
-        for c in self.contacts:
-            try:
-                is_online, _ = self.server.get_status(c["name"])
-                if c["online"] != is_online:
-                    c["online"] = is_online
-                    changed = True
-                    if active_name and active_name.lower() == c["name"].lower():
-                        active_chat_status_changed = True
-                    # Se o contato ficou online, marca mensagens pendentes dele como entregues (✓✓)
-                    if is_online:
-                        contact_msgs = self.messages.get(c["name"], [])
-                        updated_any = False
-                        for m in contact_msgs:
-                            if m.get("pending", False):
-                                m["pending"] = False
-                                updated_any = True
-                        if updated_any:
-                            self._save_data()
-                            if active_name and active_name.lower() == c["name"].lower():
-                                active_chat_updated = True
-            except Exception as e:
-                print(f"[DEBUG] Erro ao obter status do contato {c['name']}: {e}")
+        if hasattr(self, 'network'):
+            for c in self.contacts:
+                try:
+                    is_online, _ = self.network.get_status(c["name"])
+                    if c["online"] != is_online:
+                        c["online"] = is_online
+                        changed = True
+                        if active_name and active_name.lower() == c["name"].lower():
+                            active_chat_status_changed = True
+                        # Se o contato ficou online, marca mensagens pendentes dele como entregues (✓✓)
+                        if is_online:
+                            contact_msgs = self.messages.get(c["name"], [])
+                            updated_any = False
+                            for m in contact_msgs:
+                                if m.get("pending", False):
+                                    m["pending"] = False
+                                    updated_any = True
+                            if updated_any:
+                                self._save_data()
+                                if active_name and active_name.lower() == c["name"].lower():
+                                    active_chat_updated = True
+                except Exception as e:
+                    print(f"[DEBUG] Erro ao obter status do contato {c['name']}: {e}")
             
         if changed:
             self._render_contacts()
@@ -515,7 +453,7 @@ class ChatApp(ctk.CTk):
             self._status_dot.configure(text_color=ONLINE_CLR)
             self._status_btn.configure(text="Online", fg_color=ACCENT, hover_color=ACCENT_HOVER)
             try:
-                offline_msgs = self.server.login(self.my_name, self.my_uri)
+                offline_msgs = self.network.toggle_status(True)
                 for msg in offline_msgs:
                     self.handle_incoming_message(msg["sender"], msg["text"], msg["time"])
             except:
@@ -524,7 +462,7 @@ class ChatApp(ctk.CTk):
             self._status_dot.configure(text_color=OFFLINE_CLR)
             self._status_btn.configure(text="Offline", fg_color=OFFLINE_CLR, hover_color="#4B5563")
             try:
-                self.server.logout(self.my_name)
+                self.network.toggle_status(False)
             except:
                 pass
 
@@ -538,23 +476,8 @@ class ChatApp(ctk.CTk):
         if not name:
             return
 
-        now = datetime.now().strftime("%H:%M")
-        pending = True
-
         try:
-            if self.my_online.get():
-                is_online, contact_uri = self.server.get_status(name)
-                if is_online:
-                    try:
-                        proxy = Pyro5.api.Proxy(contact_uri)
-                        proxy.receive_message(self.my_name, text, now)
-                        pending = False
-                    except Exception:
-                        self.server.send_offline_message(self.my_name, name, text, now)
-                else:
-                    self.server.send_offline_message(self.my_name, name, text, now)
-            else:
-                self.server.send_offline_message(self.my_name, name, text, now)
+            now, pending = self.network.send_message(name, text)
         except Exception as e:
             messagebox.showerror("Erro de Envio", f"Erro de conexão com o servidor.\n{e}")
             return
@@ -580,7 +503,7 @@ class ChatApp(ctk.CTk):
             return
             
         try:
-            is_online, _ = self.server.get_status(name)
+            is_online, _ = self.network.get_status(name)
         except:
             is_online = False
             
