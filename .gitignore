@@ -24,3 +24,8 @@ venv.bak/
 *.njsproj
 *.sln
 *.sw?
+
+# PyInstaller build files
+build/
+dist/
+*.spec
