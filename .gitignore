@@ -29,3 +29,7 @@ venv.bak/
 build/
 dist/
 *.spec
+
+# Documentação local não commitada
+fluxo_funcionalidades.txt
+
