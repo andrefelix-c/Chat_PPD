@@ -450,6 +450,9 @@ class ChatApp(ctk.CTk):
                 pass
 
     def _send_message(self):
+        if not self.my_online.get():
+            messagebox.showwarning("Aviso", "Você está offline. Mude seu status para 'Online' para enviar mensagens.")
+            return
         text = self._msg_entry.get("1.0", "end").strip()
         if not text:
             return

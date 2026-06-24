@@ -73,18 +73,17 @@ class ChatNetworkClient:
             self.daemon_exception = e
 
     def send_message(self, target_name, text):
+        if not self.my_online:
+            raise Exception("Você está offline. Mude seu status para 'Online' para enviar mensagens.")
         now = datetime.now().strftime("%H:%M")
         pending = True
-        if self.my_online:
-            is_online, contact_uri = self.server.get_status(target_name)
-            if is_online:
-                try:
-                    proxy = Pyro5.api.Proxy(contact_uri)
-                    proxy.receive_message(self.my_name, text, now)
-                    pending = False
-                except Exception:
-                    self.server.send_offline_message(self.my_name, target_name, text, now)
-            else:
+        is_online, contact_uri = self.server.get_status(target_name)
+        if is_online:
+            try:
+                proxy = Pyro5.api.Proxy(contact_uri)
+                proxy.receive_message(self.my_name, text, now)
+                pending = False
+            except Exception:
                 self.server.send_offline_message(self.my_name, target_name, text, now)
         else:
             self.server.send_offline_message(self.my_name, target_name, text, now)
