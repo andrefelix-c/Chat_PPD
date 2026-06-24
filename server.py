@@ -20,11 +20,10 @@ def get_local_ip():
 @Pyro5.api.expose
 class MessageServer(object):
     def __init__(self):
-        self.online_users = {} # client_name -> uri
+        self.online_users = {}
         self.lock = threading.Lock()
 
     def _get_channel(self):
-        # Tenta conectar via 127.0.0.1 primeiro, depois localhost
         try:
             conn = pika.BlockingConnection(pika.ConnectionParameters('127.0.0.1'))
             return conn, conn.channel()

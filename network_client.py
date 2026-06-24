@@ -34,12 +34,10 @@ class ChatNetworkClient:
         except Exception as e:
             raise Exception(f"Não foi possível conectar ao servidor.\n{e}")
 
-        # Start local daemon
         self.daemon_exception = None
         self.daemon_thread = threading.Thread(target=self._run_daemon, daemon=True)
         self.daemon_thread.start()
 
-        # Wait for my_uri to be populated
         import time as time_mod
         start_time = time_mod.time()
         while not self.my_uri:
@@ -49,7 +47,6 @@ class ChatNetworkClient:
                 raise Exception("Tempo limite esgotado ao iniciar o daemon local.")
             time_mod.sleep(0.1)
 
-        # Register client & login
         try:
             self.server.register_client(self.my_name)
             offline_msgs = self.server.login(self.my_name, self.my_uri)
@@ -62,7 +59,6 @@ class ChatNetworkClient:
             ip = get_local_ip()
             self.daemon = Pyro5.api.Daemon(host=ip, port=0)
             
-            # Expoe o receptor P2P
             @Pyro5.api.expose
             class ClientNode(object):
                 def __init__(self, client):

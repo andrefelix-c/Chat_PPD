@@ -6,7 +6,6 @@ import os
 import json
 from network_client import ChatNetworkClient, get_local_ip
 
-# ── Palette ────────────────────────────────────────────────────────────────
 BG_DARK      = "#0C0E14"   
 BG_PANEL     = "#161824"   
 BG_CARD      = "#202336"   
@@ -24,9 +23,6 @@ DANGER_HOVER = "#DC2626"
 INPUT_BG     = "#1A1B26"   
 BORDER_COLOR = "#23283D"   
 
-# (get_local_ip e ClientNode foram movidos para network_client.py)
-
-# ═══════════════════════════════════════════════════════════════════════════
 class ChatApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -40,7 +36,6 @@ class ChatApp(ctk.CTk):
         self.configure(fg_color=BG_DARK)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # Pedir nome e IP
         print("[DEBUG] Pedindo nome do contato...")
         self.my_name = simpledialog.askstring("Login", "Seu Nome de Contato:", parent=self)
         if not self.my_name:
@@ -59,9 +54,8 @@ class ChatApp(ctk.CTk):
         self._load_data()
         self.active_chat = tk.StringVar(value="")
 
-        # Inicializar e conectar o gerenciador de rede
         try:
-            # Callback thread-safe para receber mensagens de rede
+
             def on_message_received(sender, text, time):
                 self.after(0, self.handle_incoming_message, sender, text, time)
                 
@@ -75,20 +69,18 @@ class ChatApp(ctk.CTk):
             self.destroy()
             os._exit(0)
 
-        # Mostrar UI
         print("[DEBUG] Construindo UI...")
         self._build_ui()
         print("[DEBUG] UI construída. Renderizando contatos...")
         self._render_contacts()
 
-        # Processar mensagens que chegaram enquanto estávamos offline
         print("[DEBUG] Processando mensagens offline...")
         for msg in offline_msgs:
             if isinstance(msg, dict) and "sender" in msg and "text" in msg and "time" in msg:
                 self.handle_incoming_message(msg["sender"], msg["text"], msg["time"])
 
         print("[DEBUG] Iniciando polling de status...")
-        # Loop de polling de status
+
         self.after(1000, self._update_statuses)
         print("[DEBUG] Inicialização do __init__ concluída. Chamando mainloop.")
 
@@ -138,7 +130,7 @@ class ChatApp(ctk.CTk):
         os._exit(0)
 
     def handle_incoming_message(self, sender, text, time):
-        # Encontra se o contato já existe (ignorando case)
+
         contact = next((c for c in self.contacts if c["name"].lower() == sender.lower()), None)
         
         if not contact:
@@ -146,7 +138,7 @@ class ChatApp(ctk.CTk):
             try:
                 is_online, _ = self.network.get_status(sender)
             except: pass
-            # Mantém o sender com a capitalização original que ele enviou
+
             self.contacts.append({"name": sender, "online": is_online, "unread": 0})
             self.messages[sender] = []
             chat_name = sender
@@ -162,7 +154,7 @@ class ChatApp(ctk.CTk):
             if contact:
                 contact["unread"] = contact.get("unread", 0) + 1
             else:
-                # Se acabou de ser adicionado, encontra ele na lista
+
                 for c in self.contacts:
                     if c["name"].lower() == sender.lower():
                         c["unread"] = c.get("unread", 0) + 1
@@ -171,14 +163,13 @@ class ChatApp(ctk.CTk):
         self._save_data()
 
     def _update_statuses(self):
-        # Apenas tenta se auto-registrar se o usuário quer estar Online
+
         if self.my_online.get() and hasattr(self, 'network'):
             try:
                 self.network.ensure_login()
             except Exception as e:
                 print(f"[DEBUG] Erro ao verificar auto-registro no servidor: {e}")
 
-        # Polling de status dos contatos roda sempre, independente do estado local do usuário
         changed = False
         active_name = self.active_chat.get()
         active_chat_status_changed = False
@@ -193,7 +184,7 @@ class ChatApp(ctk.CTk):
                         changed = True
                         if active_name and active_name.lower() == c["name"].lower():
                             active_chat_status_changed = True
-                        # Se o contato ficou online, marca mensagens pendentes dele como entregues (✓✓)
+
                         if is_online:
                             contact_msgs = self.messages.get(c["name"], [])
                             updated_any = False
@@ -211,7 +202,7 @@ class ChatApp(ctk.CTk):
         if changed:
             self._render_contacts()
         if active_chat_status_changed:
-            # Atualiza o status no cabeçalho do chat ativo
+
             contact = next((con for con in self.contacts if con["name"].lower() == active_name.lower()), None)
             if contact:
                 self._chat_status.configure(
@@ -222,9 +213,8 @@ class ChatApp(ctk.CTk):
             
         self.after(1000, self._update_statuses)
 
-    # ── UI construction ──────────────────────────────────────────────────
     def _build_ui(self):
-        # Top bar
+
         topbar = ctk.CTkFrame(self, fg_color=BG_PANEL, height=60, corner_radius=0)
         topbar.pack(fill="x", side="top")
         topbar.pack_propagate(False)
@@ -245,11 +235,9 @@ class ChatApp(ctk.CTk):
                                          command=self._toggle_my_status)
         self._status_btn.pack(side="left")
 
-        # Main area
         main = ctk.CTkFrame(self, fg_color="transparent")
         main.pack(fill="both", expand=True)
 
-        # Sidebar
         sidebar = ctk.CTkFrame(main, fg_color=BG_PANEL, width=260, corner_radius=0)
         sidebar.pack(fill="y", side="left")
         sidebar.pack_propagate(False)
@@ -275,7 +263,6 @@ class ChatApp(ctk.CTk):
         self._contacts_frame = ctk.CTkScrollableFrame(sidebar, fg_color="transparent", corner_radius=0)
         self._contacts_frame.pack(fill="both", expand=True, padx=4, pady=(0, 4))
 
-        # Chat panel
         chat_col = ctk.CTkFrame(main, fg_color=BG_DARK, corner_radius=0)
         chat_col.pack(fill="both", expand=True, side="left")
 
@@ -316,8 +303,6 @@ class ChatApp(ctk.CTk):
                                  command=self._send_message)
         send_btn.pack(side="right", padx=(0, 16), pady=16)
 
-
-    # ── Contacts rendering ───────────────────────────────────────────────
     def _render_contacts(self):
         for w in self._contacts_frame.winfo_children():
             w.destroy()
@@ -379,7 +364,6 @@ class ChatApp(ctk.CTk):
         row.bind("<Enter>", on_enter)
         row.bind("<Leave>", on_leave)
 
-    # ── Chat rendering ───────────────────────────────────────────────────
     def _open_chat(self, name):
         for c in self.contacts:
             if c["name"] == name:
@@ -446,7 +430,6 @@ class ChatApp(ctk.CTk):
             status_lbl = ctk.CTkLabel(meta_line, text="✓✓", font=("Segoe UI", 8), text_color=ONLINE_CLR)
             status_lbl.pack(side="right")
 
-    # ── Actions ──────────────────────────────────────────────────────────
     def _toggle_my_status(self):
         self.my_online.set(not self.my_online.get())
         if self.my_online.get():
@@ -528,7 +511,6 @@ class ChatApp(ctk.CTk):
         self._render_contacts()
         self._save_data()
 
-# ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app = ChatApp()
     app.mainloop()
